@@ -1,4 +1,5 @@
 """Portable projects and workspace backups with checked, bounded ZIP extraction."""
+from contextlib import closing
 from pathlib import Path,PurePosixPath
 import copy
 import hashlib
@@ -127,7 +128,8 @@ def backup_workspace(database_path,output_file):
             lock.execute('BEGIN IMMEDIATE')
             if lock.execute("SELECT 1 FROM jobs WHERE state='running'").fetchone():
                 raise ValueError('Pause running jobs before creating a workspace backup.')
-            with sqlite3.connect(store.path) as source,sqlite3.connect(snapshot) as destination:source.backup(destination)
+            with closing(sqlite3.connect(store.path)) as source,closing(sqlite3.connect(snapshot)) as destination:
+                with destination:source.backup(destination)
             files={'workspace.sqlite3':snapshot}
             for name in ['imports','jobs']:
                 if (root/name).is_symlink():continue
@@ -163,7 +165,7 @@ def restore_workspace(input_file,destination):
                     mapping[old+'\\'+str(parent).replace('/','\\')]=str(destination/parent)
         mapping[old+'/'+manifest.get('database_name','workspace.sqlite3')]=str(destination/'workspace.sqlite3')
         mapping[old+'\\'+manifest.get('database_name','workspace.sqlite3')]=str(destination/'workspace.sqlite3')
-        with sqlite3.connect(staging/'workspace.sqlite3') as db:
+        with closing(sqlite3.connect(staging/'workspace.sqlite3')) as db,db:
             if db.execute('PRAGMA integrity_check').fetchone()[0]!='ok':raise ValueError('Backup database is corrupt.')
             for table,column in [('projects','document'),('jobs','spec'),('jobs','result')]:
                 for row_id,raw in db.execute(f'SELECT id,{column} FROM {table} WHERE {column} IS NOT NULL').fetchall():

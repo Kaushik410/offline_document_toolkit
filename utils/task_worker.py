@@ -103,6 +103,7 @@ class TaskWorker(QRunnable):
         temporary_outputs = set()
         outcome = None
         group_started = False
+        pipe_closed = False
         process = None
 
         def receive():
@@ -119,6 +120,24 @@ class TaskWorker(QRunnable):
             elif kind == 'status':
                 self.signals.status.emit(value)
 
+        def receive_available(timeout=0):
+            nonlocal pipe_closed
+            try:
+                if not receiver.poll(timeout):
+                    return False
+                receive()
+                return True
+            except EOFError:
+                pipe_closed = True
+            except OSError as error:
+                # Windows named pipes report peer closure from poll()/recv()
+                # as ERROR_BROKEN_PIPE or ERROR_NO_DATA, including after a
+                # complete result has already arrived.
+                if getattr(error,'winerror',None) not in (109,232):
+                    raise
+                pipe_closed = True
+            return False
+
         try:
             with tempfile.TemporaryDirectory(prefix='odt-task-') as scratch:
                 if not self.is_cancelled():
@@ -127,20 +146,15 @@ class TaskWorker(QRunnable):
                     process.start()
                     sender.close()
                     while process.is_alive():
-                        if receiver.poll(0.05):
-                            try:
-                                receive()
-                            except EOFError:
-                                break
+                        receive_available(0.05)
+                        if pipe_closed:
+                            break
                         if self.is_cancelled():
                             self._stop(process, group_started)
                             break
                     process.join(timeout=2)
-                    while receiver.poll():
-                        try:
-                            receive()
-                        except EOFError:
-                            break
+                    while not pipe_closed and receive_available():
+                        pass
                     if process.is_alive():
                         self._stop(process, group_started)
                     elif os.name == 'posix' and group_started:

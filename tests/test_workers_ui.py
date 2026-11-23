@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 import time
 from unittest.mock import patch
+import pytest
 
 from PIL import Image
 from PySide6.QtCore import QTimer
@@ -18,6 +19,37 @@ def test_worker_process_isolated_from_gui_and_delivers_result(qapp):
     wait_until(qapp,lambda:bool(results))
     assert results[0] != os.getpid()
     parent.close()
+
+
+@pytest.mark.parametrize('winerror',[109,232,5])
+def test_completed_worker_handles_closed_windows_pipe(qapp,monkeypatch,winerror):
+    from utils import task_worker
+    messages=[('started',None),('finished',{'saved':True})]
+    class Receiver:
+        def poll(self,timeout=0):
+            if messages:return True
+            error=OSError('Synthetic Windows pipe status');error.winerror=winerror
+            raise error
+        def recv(self):return messages.pop(0)
+        def close(self):pass
+    class Sender:
+        def close(self):pass
+    class Process:
+        pid=1
+        def start(self):pass
+        def is_alive(self):return bool(messages)
+        def join(self,timeout=None):pass
+    class Context:
+        def Pipe(self,duplex=False):return Receiver(),Sender()
+        def Process(self,**kwargs):return Process()
+    monkeypatch.setattr(task_worker.mp,'get_context',lambda method:Context())
+    if hasattr(task_worker.os,'killpg'):monkeypatch.setattr(task_worker.os,'killpg',lambda *args:None)
+    results=[];errors=[]
+    worker=task_worker.TaskWorker(process_identity)
+    worker.signals.finished.connect(results.append);worker.signals.error.connect(errors.append)
+    worker.run()
+    if winerror in (109,232):assert results==[{'saved':True}] and not errors
+    else:assert errors and not results
 
 
 def test_cancel_stops_current_operation_and_removes_partial_output(qapp,tmp_path):

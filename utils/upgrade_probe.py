@@ -1,4 +1,5 @@
 """Open the disposable upgrade fixture in the real application and preserve its state."""
+from contextlib import closing
 import json
 import os
 from pathlib import Path
@@ -16,7 +17,7 @@ def run(data_directory,report_file):
     try:
         data=Path(data_directory).resolve();database=data/'workspace.sqlite3'
         if not database.is_file():raise ValueError('The disposable upgrade fixture is missing.')
-        with sqlite3.connect(database.as_uri()+'?mode=ro',uri=True) as db:
+        with closing(sqlite3.connect(database.as_uri()+'?mode=ro',uri=True)) as db:
             if not db.execute('SELECT 1 FROM projects WHERE id=?',(FIXTURE_ID,)).fetchone():
                 raise ValueError('This command only accepts a disposable upgrade-fixture workspace.')
         os.environ.update(ODT_DATA_DIR=str(data),ODT_CONFIG_DIR=str(data.parent),ODT_NO_SETUP='1')

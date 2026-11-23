@@ -85,6 +85,30 @@ def test_native_gui_probe_reopens_and_preserves_legacy_project(tmp_path):
     preserved(fixture)
 
 
+def test_backup_and_restore_release_every_database_handle(tmp_path,monkeypatch):
+    import sqlite3
+    from services.project_archive import backup_workspace,restore_workspace
+    from services.workspace_store import WorkspaceStore
+    original=sqlite3.connect;opened=set()
+    class TrackedConnection(sqlite3.Connection):
+        def __init__(self,*args,**kwargs):
+            super().__init__(*args,**kwargs);opened.add(self)
+        def close(self):
+            try:super().close()
+            finally:opened.discard(self)
+    def connect(*args,**kwargs):return original(*args,**dict(kwargs,factory=TrackedConnection))
+    monkeypatch.setattr(sqlite3,'connect',connect)
+    try:
+        store=WorkspaceStore(tmp_path/'data/workspace.sqlite3')
+        store.enqueue('Synthetic job',{})
+        backup=backup_workspace(store.path,tmp_path/'workspace.odtbackup')
+        assert not opened,'Backup retained SQLite handles'
+        restore_workspace(backup,tmp_path/'restored')
+        assert not opened,'Restore retained SQLite handles'
+    finally:
+        for connection in list(opened):connection.close()
+
+
 def test_upgrade_checks_fresh_install_before_existing_user_data(tmp_path,monkeypatch):
     from scripts import verify_installer as verifier
     current=tmp_path/'current.deb';current.touch()

@@ -1,5 +1,6 @@
 """Linux/Windows installer checks with a real saved project and native GUI migration probe."""
 import argparse
+from contextlib import closing
 import copy
 import hashlib
 import json
@@ -62,7 +63,7 @@ def prepare_fixture(data,output,original):
     base={'assets':{'fixture-asset':asset},'pages':[{'id':'fixture-page','asset':'fixture-asset','page':0,'rotation':0,'crop':None,'edits':[]}]}
     edited=copy.deepcopy(base);edited['pages'][0]['rotation']=90
     saved={'history':[base,edited],'position':1}
-    with sqlite3.connect(data/'workspace.sqlite3') as db:
+    with closing(sqlite3.connect(data/'workspace.sqlite3')) as db,db:
         db.execute('CREATE TABLE projects(id TEXT PRIMARY KEY,name TEXT NOT NULL,document TEXT NOT NULL,updated REAL NOT NULL)')
         db.execute('INSERT INTO projects VALUES(?,?,?,?)',(FIXTURE_ID,'Preserved upgrade project',json.dumps(saved),0))
         db.execute('PRAGMA user_version=1')
@@ -78,7 +79,7 @@ def preserved(fixture):
     if (data/'keep-me.txt').read_text()!='Preserve user workspace':raise RuntimeError('User workspace marker was modified.')
     for key in ('snapshot','original','export'):
         if file_digest(fixture[key])!=fixture['hash']:raise RuntimeError('A user document changed during installation: '+key)
-    with sqlite3.connect(data/'workspace.sqlite3') as db:
+    with closing(sqlite3.connect(data/'workspace.sqlite3')) as db:
         row=db.execute('SELECT name,document FROM projects WHERE id=?',(FIXTURE_ID,)).fetchone()
     if not row or row[0]!='Preserved upgrade project':raise RuntimeError('The saved user project was lost.')
     model=WorkspaceModel(json.loads(row[1]))
