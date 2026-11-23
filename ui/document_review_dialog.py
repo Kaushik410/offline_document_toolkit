@@ -3,6 +3,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt,QPointF,QTimer
 from PySide6.QtGui import QPixmap
 from PySide6.QtPdf import QPdfDocument,QPdfSearchModel
+from shiboken6 import delete
 from PySide6.QtPdfWidgets import QPdfView
 from PySide6.QtWidgets import (QDialog,QVBoxLayout,QHBoxLayout,QSplitter,QLabel,QPushButton,
     QSpinBox,QDoubleSpinBox,QLineEdit,QListWidget,QTabWidget,QWidget,QScrollArea,QMessageBox)
@@ -35,9 +36,12 @@ class DocumentReviewDialog(QDialog):
         documents=QSplitter();self.tabs.addTab(documents,'Original and export' if before else 'Document')
         for label,path in ([('Original',viewer_before or before)] if before else [])+[('Export',viewer_after or after)]:
             pane=QWidget();box=QVBoxLayout(pane);box.addWidget(QLabel(label))
-            view=QPdfView();pdf=QPdfDocument(self);pdf.load(str(path));view.setDocument(pdf)
+            # Keep documents outside the view's QObject child tree. Qt 6.11
+            # can access its document while destroying the view's children.
+            view=QPdfView();model=QPdfSearchModel(self);pdf=QPdfDocument(self)
+            pdf.load(str(path));view.setDocument(pdf)
             view.setPageMode(QPdfView.PageMode.SinglePage);view.setZoomMode(QPdfView.ZoomMode.Custom)
-            model=QPdfSearchModel(self);model.setDocument(pdf);view.setSearchModel(model)
+            model.setDocument(pdf);view.setSearchModel(model)
             self.views.append(view);self.documents.append(pdf);self.models.append(model);box.addWidget(view,1);documents.addWidget(pane)
         self.difference=QLabel();self.difference.setAlignment(Qt.AlignCenter)
         scroll=QScrollArea();scroll.setWidgetResizable(True);scroll.setWidget(self.difference)
@@ -62,8 +66,8 @@ class DocumentReviewDialog(QDialog):
         self.page.valueChanged.connect(self.navigate);self.zoom.valueChanged.connect(self.navigate)
         self.tabs.currentChanged.connect(self.navigate)
         self.page.setValue(min(initial_page+1,count));self.changes.setCurrentRow(self.page.value()-1)
-        QTimer.singleShot(0,self.navigate)
-        if query:QTimer.singleShot(100,self.search)
+        QTimer.singleShot(0,self,self.navigate)
+        if query:QTimer.singleShot(100,self,self.search)
 
     def navigate(self,*args):
         if self.closing:return
@@ -74,7 +78,7 @@ class DocumentReviewDialog(QDialog):
         if self.before and self.tabs.currentIndex()==1:
             controller=getattr(self.diff_owner,'_task_controller',None)
             if controller and controller.worker:
-                controller.cancel();QTimer.singleShot(100,self.navigate);return
+                controller.cancel();QTimer.singleShot(100,self,self.navigate);return
             self.diff_generation+=1;generation=self.diff_generation
             def complete(image):
                 if self.closing or generation!=self.diff_generation:return
@@ -97,14 +101,23 @@ class DocumentReviewDialog(QDialog):
         if self.approval and self.approval():self.accept()
 
     def done(self,result):
+        if self.closing:
+            super().done(result)
+            return
         self.closing=True;self.diff_generation+=1;cancel_tasks(self)
         # PDF rendering/search jobs are asynchronous. Detach their consumers
         # before closing the document handles, including delayed search timers.
         for view in self.views:
             view.setSearchModel(None)
             view.setDocument(None)
+            # QPdfView owns QPdfPageRenderer. Synchronous destruction joins
+            # its render thread while our separately owned PDFs remain valid.
+            delete(view)
+        self.views.clear()
         for model in self.models:
             model.setSearchString('')
             model.setDocument(None)
+            delete(model)
+        self.models.clear()
         for pdf in self.documents:pdf.close()
         super().done(result)

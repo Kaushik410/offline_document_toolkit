@@ -182,29 +182,37 @@ def test_pdf_viewer_can_close_during_queued_search_and_rendering(pdf):
 import sys,gc
 from ui.document_review_dialog import DocumentReviewDialog
 from utils.qt_runtime import configure_qt_plugins
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication,QWidget
 from PySide6.QtCore import QCoreApplication,QEvent
 from PySide6.QtTest import QTest
+from shiboken6 import isValid
 configure_qt_plugins()
 app=QApplication([])
 app.setQuitOnLastWindowClosed(False)
-for index in range(20):
-    dialog=DocumentReviewDialog(sys.argv[1],sys.argv[1],query='TOOLKIT')
+for index in range(40):
+    owner=QWidget()
+    dialog=DocumentReviewDialog(sys.argv[1],sys.argv[1],query='TOOLKIT',parent=owner)
     dialog.show()
     app.processEvents()
-    dialog.close()
-    assert all(view.document() is None for view in dialog.views)
-    assert all(model.document() is None for model in dialog.models)
-    dialog.search()
-    dialog.deleteLater()
+    if index%2==0:
+        views=list(dialog.views);models=list(dialog.models)
+        dialog.close()
+        assert all(not isValid(view) for view in views)
+        assert all(not isValid(model) for model in models)
+        assert all(pdf.pageCount()==0 for pdf in dialog.documents)
+        dialog.search()
+        dialog.deleteLater()
+    # Also cover parent-driven destruction, which does not call done().
+    owner.deleteLater()
     QCoreApplication.sendPostedEvents(None,QEvent.DeferredDelete)
     QTest.qWait(10)
-    del dialog
+    del dialog,owner
     gc.collect()
 QTest.qWait(150)
-print('Twenty asynchronous PDF viewer closes passed')
+print('Forty asynchronous PDF viewer closes passed')
 '''
     result=subprocess.run([sys.executable,'-c',program,str(pdf)],cwd=ROOT,
         env=dict(os.environ,QT_QPA_PLATFORM='offscreen'),capture_output=True,text=True,timeout=45)
     assert result.returncode==0,result.stdout+result.stderr
-    assert 'Twenty asynchronous PDF viewer closes passed' in result.stdout
+    assert 'Forty asynchronous PDF viewer closes passed' in result.stdout
+    assert 'Traceback' not in result.stderr
