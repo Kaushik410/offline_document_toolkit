@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools==70.2.0", "wheel==0.43.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "offline-document-toolkit"
+version = "0.4.1"
+description = "Local desktop tools for PDFs, images, OCR, and Word documents"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = {file = "LICENSE"}
+dependencies = [
+  "PySide6==6.11.0", "pypdf==6.10.2", "PyMuPDF==1.27.2.3",
+  "Pillow==11.1.0", "opencv-python-headless==4.10.0.84",
+  "pytesseract==0.3.13", "python-docx==1.2.0", "numpy==1.26.4"
+]
+
+[project.scripts]
+offline-document-toolkit = "main:main"
+
+[tool.setuptools]
+py-modules = ["main"]
+include-package-data = false
+
+[tool.setuptools.data-files]
+"share/offline-document-toolkit" = ["THIRD_PARTY_NOTICES.md", "assets/document-toolkit.svg"]
+
+[tool.setuptools.packages.find]
+include = ["services", "ui", "utils"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = ["integration: uses real document engines installed on the system"]

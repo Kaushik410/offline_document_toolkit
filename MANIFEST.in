@@ -1,0 +1,18 @@
+include README.md LICENSE THIRD_PARTY_NOTICES.md .gitignore
+include requirements*.txt OfflineDocumentToolkit.spec app_settings.example.json
+recursive-include services *.py
+recursive-include ui *.py
+recursive-include utils *.py
+recursive-include tests *.py
+recursive-include scripts *.py
+recursive-include examples *.py
+include .github/workflows/ci.yml
+include .github/workflows/installers.yml
+recursive-include packaging *.iss *.desktop
+recursive-include assets *.svg
+exclude app_settings.json
+global-exclude *.pyc
+
+recursive-include packaging/baseline *.json *.zip
+
+recursive-include packaging *.ps1
