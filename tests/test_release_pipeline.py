@@ -141,7 +141,9 @@ def test_system_engine_environment_restores_user_library_paths_without_mutating_
     environment={'LD_LIBRARY_PATH':str(bundle),'LD_LIBRARY_PATH_ORIG':'/usr/local/lib',
         'PATH':str(bundle/'tools')+os.pathsep+'/usr/bin','QT_PLUGIN_PATH':str(bundle/'Qt/plugins')}
     sanitized=system_environment(environment)
-    assert sanitized['LD_LIBRARY_PATH']=='/usr/local/lib' and sanitized['PATH']=='/usr/bin'
+    if os.name=='posix':assert sanitized['LD_LIBRARY_PATH']=='/usr/local/lib'
+    else:assert sanitized['LD_LIBRARY_PATH']==environment['LD_LIBRARY_PATH']
+    assert sanitized['PATH']=='/usr/bin'
     assert 'QT_PLUGIN_PATH' not in sanitized and environment['LD_LIBRARY_PATH']==str(bundle)
 
 

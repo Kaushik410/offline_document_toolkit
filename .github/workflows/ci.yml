@@ -5,7 +5,40 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 jobs:
+  retire_obsolete_runs:
+    if: startsWith(github.head_ref || github.ref_name, 'release/linux-windows-') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 2
+    permissions:
+      actions: write
+    steps:
+      - name: Stop older checks for this release branch
+        shell: python
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_BRANCH: ${{ github.head_ref || github.ref_name }}
+          CURRENT_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          import json,os,urllib.error,urllib.parse,urllib.request
+          root='https://api.github.com/repos/'+os.environ['REPOSITORY']+'/actions/runs'
+          headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'}
+          query=urllib.parse.urlencode({'branch':os.environ['RELEASE_BRANCH'],'per_page':100})
+          with urllib.request.urlopen(urllib.request.Request(root+'?'+query,headers=headers),timeout=30) as response:
+              runs=json.load(response)['workflow_runs']
+          for run in runs:
+              if run['head_sha']!=os.environ['CURRENT_COMMIT'] and run['status'] in ('queued','in_progress','waiting','pending','requested'):
+                  request=urllib.request.Request(root+'/'+str(run['id'])+'/cancel',headers=headers,data=b'',method='POST')
+                  try:
+                      with urllib.request.urlopen(request,timeout=30):pass
+                      print('Cancelled superseded run',run['id'])
+                  except urllib.error.HTTPError as error:
+                      if error.code!=409:raise
+                      print('Run already stopped or finishing',run['id'])
   unit:
     timeout-minutes: 15
     strategy:
