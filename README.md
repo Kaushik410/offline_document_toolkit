@@ -117,7 +117,7 @@ Ubuntu/Debian:
 
 ```bash
 sudo apt-get update
-sudo apt-get install tesseract-ocr tesseract-ocr-hin libreoffice-writer ghostscript fonts-dejavu-core libegl1 libopengl0
+sudo apt-get install tesseract-ocr tesseract-ocr-hin libreoffice-writer ghostscript fonts-dejavu-core libegl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-shape0 libxcb-keysyms1
 ```
 
 On Windows, install [Tesseract](https://tesseract-ocr.github.io/tessdoc/Installation.html), [LibreOffice](https://www.libreoffice.org/download/download-libreoffice/), and [Ghostscript](https://ghostscript.com/releases/gsdnld.html). Setup detects common installation locations; use **Locate executable** for a custom location. Ensure the desired Tesseract language data is installed. Settings displays detected engine locations and versions.

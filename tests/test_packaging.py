@@ -28,6 +28,8 @@ def test_linux_installer_contains_native_launcher_and_engine_dependencies(tmp_pa
     package=build_linux(bundle,tmp_path/'installers')
     control=subprocess.check_output(['dpkg-deb','--field',str(package)],text=True)
     assert 'Version: 0.4.1' in control and 'tesseract-ocr-hin' in control and 'libreoffice-writer' in control
+    for dependency in ('libxcb-cursor0','libxkbcommon-x11-0','libxcb-icccm4','libxcb-shape0','libxcb-keysyms1'):
+        assert dependency in control
     subprocess.run(['dpkg-deb','--extract',str(package),str(tmp_path/'extracted')],check=True)
     assert (tmp_path/'extracted/opt/offline-document-toolkit/OfflineDocumentToolkit').is_file()
     desktop=tmp_path/'extracted/usr/share/applications/offline-document-toolkit.desktop'

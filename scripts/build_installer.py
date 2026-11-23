@@ -19,7 +19,8 @@ def build_linux(source,output,with_engines=True):
         package=Path(directory)
         shutil.copytree(source,package/'opt/offline-document-toolkit',symlinks=True)
         control=package/'DEBIAN';control.mkdir()
-        dependencies=['libegl1','libopengl0','libxcb-cursor0','libxkbcommon-x11-0']
+        dependencies=['libegl1','libopengl0','libxcb-cursor0','libxkbcommon-x11-0',
+                      'libxcb-icccm4','libxcb-shape0','libxcb-keysyms1']
         if with_engines:dependencies+=['tesseract-ocr','tesseract-ocr-eng','tesseract-ocr-hin','ghostscript','libreoffice-writer']
         (control/'control').write_text(f'Package: offline-document-toolkit\nVersion: {version}\n'
             f'Architecture: {architecture}\nMaintainer: Offline Document Toolkit contributors\n'

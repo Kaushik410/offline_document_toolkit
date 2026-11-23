@@ -60,3 +60,17 @@ def wait_until(qapp, predicate, timeout=15):
 @pytest.fixture(autouse=True)
 def isolated_workspace(tmp_path, monkeypatch):
     monkeypatch.setenv("ODT_DATA_DIR", str(tmp_path / "workspace-state"))
+
+
+@pytest.fixture(autouse=True)
+def unexpected_gui_errors_fail_without_a_modal_dialog(monkeypatch):
+    # A worker error otherwise opens a modal window inside processEvents(),
+    # blocking the headless test before its wait timeout can run.
+    from PySide6.QtWidgets import QMessageBox
+    errors=[]
+    def record_error(parent,title,message,*args,**kwargs):
+        errors.append(f'{title}: {message}')
+        return QMessageBox.StandardButton.Ok
+    monkeypatch.setattr(QMessageBox,'critical',record_error)
+    yield
+    assert not errors,'Unexpected GUI errors: '+'; '.join(errors)
