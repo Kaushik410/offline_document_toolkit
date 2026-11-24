@@ -1,0 +1,6 @@
+{
+  "version": "0.4.0",
+  "file": "0.4.0-source.zip",
+  "sha256": "14e06693166b625f5371c5c3e929a6c2548bd9adf6466e49a7ac526dfdfb1e4c",
+  "purpose": "Build the actual previous application for installer upgrade acceptance checks"
+}

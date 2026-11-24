@@ -1,0 +1,194 @@
+name: Native installers
+on:
+  push:
+    branches: ['release/linux-windows-*']
+  workflow_dispatch:
+    inputs:
+      previous_release:
+        description: 'Optional older GitHub release tag; otherwise build the audited 0.4.0 baseline'
+        required: false
+        default: ''
+      windows_signing:
+        description: 'Windows signing provider (unsigned testing needs no account)'
+        type: choice
+        options: [unsigned, certificate, azure]
+        default: unsigned
+      require_signing:
+        description: 'Fail instead of producing unsigned Windows packages'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+jobs:
+  package:
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    env:
+      QT_QPA_PLATFORM: offscreen
+      ODT_NO_SETUP: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Linux GUI and document engines
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-shape0 libxcb-keysyms1 xvfb xauth libreoffice-writer tesseract-ocr tesseract-ocr-hin ghostscript
+      - name: Install Windows document engine and installer compiler
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install libreoffice-fresh innosetup --yes --no-progress --limit-output
+          if ($LASTEXITCODE -notin @(0,3010)) { exit $LASTEXITCODE }
+          exit 0
+      - run: python -m pip install -r requirements-build.txt
+      - run: python -m pytest -vv -m "not integration" --junitxml=release/unit.xml
+      - name: Require real LibreOffice conversion
+        env:
+          ODT_REQUIRE_LIBREOFFICE: '1'
+        run: python -m pytest -vv tests/test_documents.py::test_real_docx_to_pdf --junitxml=release/libreoffice.xml
+      - name: Validate requested Windows signing configuration
+        if: runner.os == 'Windows'
+        shell: python
+        env:
+          PROVIDER: ${{ inputs.windows_signing }}
+          REQUIRED: ${{ inputs.require_signing }}
+          THUMBPRINT: ${{ secrets.ODT_WINDOWS_CERT_SHA1 }}
+          CLIENT_ID: ${{ secrets.ODT_AZURE_CLIENT_ID }}
+          TENANT_ID: ${{ secrets.ODT_AZURE_TENANT_ID }}
+          SUBSCRIPTION_ID: ${{ secrets.ODT_AZURE_SUBSCRIPTION_ID }}
+          ENDPOINT: ${{ vars.ODT_AZURE_SIGN_ENDPOINT }}
+          ACCOUNT: ${{ vars.ODT_AZURE_SIGN_ACCOUNT }}
+          PROFILE: ${{ vars.ODT_AZURE_SIGN_PROFILE }}
+        run: |
+          import os
+          provider=os.environ.get('PROVIDER') or 'unsigned'
+          if provider=='unsigned' and os.environ.get('REQUIRED')=='true': raise SystemExit('Signing was required but unsigned was selected.')
+          if provider=='certificate' and not os.environ.get('THUMBPRINT'): raise SystemExit('Configure ODT_WINDOWS_CERT_SHA1 and its installed certificate.')
+          if provider=='azure':
+              missing=[key for key in ['CLIENT_ID','TENANT_ID','SUBSCRIPTION_ID','ENDPOINT','ACCOUNT','PROFILE'] if not os.environ.get(key)]
+              if missing: raise SystemExit('Missing Azure signing configuration: '+', '.join(missing))
+      - name: Import optional Windows PFX identity
+        if: runner.os == 'Windows' && inputs.windows_signing == 'certificate'
+        shell: pwsh
+        env:
+          CERTIFICATE: ${{ secrets.ODT_WINDOWS_PFX_BASE64 }}
+          PASSWORD: ${{ secrets.ODT_WINDOWS_PFX_PASSWORD }}
+        run: |
+          if ($env:CERTIFICATE) {
+            $path = Join-Path $env:RUNNER_TEMP 'odt-signing.pfx'
+            try {
+              [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($env:CERTIFICATE))
+              Import-PfxCertificate -FilePath $path -CertStoreLocation Cert:\CurrentUser\My -Password (ConvertTo-SecureString $env:PASSWORD -AsPlainText -Force)
+            } finally { Remove-Item $path -ErrorAction SilentlyContinue }
+          }
+      - name: Build a genuine previous application for upgrade testing
+        if: inputs.previous_release == ''
+        run: python scripts/build_previous_release.py
+      - name: Download previous installer when a release tag is supplied
+        if: inputs.previous_release != ''
+        shell: python
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_RELEASE: ${{ inputs.previous_release }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          import os,platform,subprocess
+          pattern='*_amd64.deb' if platform.system()=='Linux' else '*Setup*.exe'
+          subprocess.run(['gh','release','download',os.environ['PREVIOUS_RELEASE'],'--repo',os.environ['REPOSITORY'],'--pattern',pattern,'--dir','release/previous-installer'],check=True)
+      - run: python -m PyInstaller --clean --noconfirm --distpath release/desktop OfflineDocumentToolkit.spec
+      - name: Authenticate to Azure using workload identity
+        if: runner.os == 'Windows' && inputs.windows_signing == 'azure'
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.ODT_AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.ODT_AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.ODT_AZURE_SUBSCRIPTION_ID }}
+      - name: Cloud-sign the Windows application
+        if: runner.os == 'Windows' && inputs.windows_signing == 'azure'
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ vars.ODT_AZURE_SIGN_ENDPOINT }}
+          signing-account-name: ${{ vars.ODT_AZURE_SIGN_ACCOUNT }}
+          certificate-profile-name: ${{ vars.ODT_AZURE_SIGN_PROFILE }}
+          files: ${{ github.workspace }}\release\desktop\OfflineDocumentToolkit\OfflineDocumentToolkit.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      - name: Sign or verify the Windows application
+        if: runner.os == 'Windows'
+        shell: python
+        env:
+          PROVIDER: ${{ inputs.windows_signing }}
+          ODT_WINDOWS_CERT_SHA1: ${{ secrets.ODT_WINDOWS_CERT_SHA1 }}
+        run: |
+          import os,subprocess,sys
+          provider=os.environ.get('PROVIDER') or 'unsigned'
+          args=[sys.executable,'scripts/sign_release.py','release/desktop/OfflineDocumentToolkit/OfflineDocumentToolkit.exe','--provider',provider,'--report','release/application-signing.json']
+          if provider!='unsigned': args+=['--required']
+          if provider=='azure': args+=['--verify-only']
+          subprocess.run(args,check=True)
+      - run: python scripts/build_installer.py
+      - name: Cloud-sign the Windows installer
+        if: runner.os == 'Windows' && inputs.windows_signing == 'azure'
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ vars.ODT_AZURE_SIGN_ENDPOINT }}
+          signing-account-name: ${{ vars.ODT_AZURE_SIGN_ACCOUNT }}
+          certificate-profile-name: ${{ vars.ODT_AZURE_SIGN_PROFILE }}
+          files-folder: ${{ github.workspace }}\release\installers
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      - name: Sign or verify the Windows installer
+        if: runner.os == 'Windows'
+        shell: python
+        env:
+          PROVIDER: ${{ inputs.windows_signing }}
+          ODT_WINDOWS_CERT_SHA1: ${{ secrets.ODT_WINDOWS_CERT_SHA1 }}
+        run: |
+          import os,subprocess,sys
+          from pathlib import Path
+          provider=os.environ.get('PROVIDER') or 'unsigned'
+          installer=next(Path('release/installers').glob('*.exe'))
+          args=[sys.executable,'scripts/sign_release.py',str(installer),'--provider',provider,'--report','release/installer-signing.json']
+          if provider!='unsigned': args+=['--required']
+          if provider=='azure': args+=['--verify-only']
+          subprocess.run(args,check=True)
+      - name: Install, upgrade, reopen the saved project, and uninstall on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          xvfb-run -a python scripts/verify_installer.py release/installers/*.deb --previous release/previous-installer/*.deb --system-install --require-libreoffice --gui-platform xcb
+      - name: Install, upgrade, reopen the saved project, and uninstall on Windows
+        if: runner.os == 'Windows'
+        shell: python
+        run: |
+          import subprocess,sys
+          from pathlib import Path
+          current=next(Path('release/installers').glob('*.exe'))
+          previous=next(Path('release/previous-installer').glob('*.exe'))
+          subprocess.run([sys.executable,'scripts/verify_installer.py',str(current),'--previous',str(previous),'--system-install','--require-libreoffice','--gui-platform','windows'],check=True)
+      - run: python scripts/package_source.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: offline-document-toolkit-${{ runner.os }}
+          path: |
+            release/installers/*
+            release/previous-installer/baseline-build.json
+            release/*signing.json
+            release/*.xml
+            release/installer-validation/*
+            release/offline-document-toolkit-source.zip

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Offline Document Toolkit
+Comment=Prepare and process documents locally
+Exec=/opt/offline-document-toolkit/OfflineDocumentToolkit %F
+Icon=offline-document-toolkit
+Terminal=false
+Categories=Office;Utility;
+MimeType=application/pdf;application/vnd.openxmlformats-officedocument.wordprocessingml.document;image/png;image/jpeg;image/tiff;
