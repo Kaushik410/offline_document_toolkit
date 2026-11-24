@@ -119,5 +119,10 @@ class DocumentReviewDialog(QDialog):
             model.setDocument(None)
             delete(model)
         self.models.clear()
-        for pdf in self.documents:pdf.close()
+        for pdf in self.documents:
+            # close() unloads the PDF. Destroy the document to release the
+            # QFile it owns as well, so Windows can replace the preview file.
+            pdf.close()
+            delete(pdf)
+        self.documents.clear()
         super().done(result)

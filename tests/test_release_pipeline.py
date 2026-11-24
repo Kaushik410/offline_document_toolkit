@@ -60,6 +60,14 @@ def test_native_required_libreoffice_cannot_be_omitted(tmp_path):
     assert '--require-libreoffice' in command.call_args.args[0]
 
 
+def test_native_acceptance_rejects_cleanup_error_even_with_success_flag(tmp_path):
+    report=tmp_path/'report.json'
+    report.write_text(json.dumps({'passed':True,'runtime':{'frozen':True},'error':'Preview file still locked'}))
+    with patch('scripts.verify_installer.subprocess.run',return_value=subprocess.CompletedProcess([],0)):
+        with pytest.raises(RuntimeError,match='Preview file still locked'):
+            native_check('launcher',report)
+
+
 def test_cloud_signing_requires_the_action_before_verification(tmp_path):
     artifact=tmp_path/'app.exe';artifact.write_bytes(b'synthetic')
     with patch('scripts.sign_release.platform.system',return_value='Windows'):
@@ -179,7 +187,8 @@ def test_unfrozen_external_tools_keep_the_callers_environment():
 
 def test_pdf_viewer_can_close_during_queued_search_and_rendering(pdf):
     program='''
-import sys,gc
+import sys,gc,shutil
+from pathlib import Path
 from ui.document_review_dialog import DocumentReviewDialog
 from utils.qt_runtime import configure_qt_plugins
 from PySide6.QtWidgets import QApplication,QWidget
@@ -190,21 +199,25 @@ configure_qt_plugins()
 app=QApplication([])
 app.setQuitOnLastWindowClosed(False)
 for index in range(40):
+    preview=Path(sys.argv[1]).with_name(f'preview-{index}.pdf')
+    shutil.copyfile(sys.argv[1],preview)
     owner=QWidget()
-    dialog=DocumentReviewDialog(sys.argv[1],sys.argv[1],query='TOOLKIT',parent=owner)
+    dialog=DocumentReviewDialog(preview,preview,query='TOOLKIT',parent=owner)
     dialog.show()
     app.processEvents()
     if index%2==0:
-        views=list(dialog.views);models=list(dialog.models)
+        views=list(dialog.views);models=list(dialog.models);documents=list(dialog.documents)
         dialog.close()
         assert all(not isValid(view) for view in views)
         assert all(not isValid(model) for model in models)
-        assert all(pdf.pageCount()==0 for pdf in dialog.documents)
+        assert all(not isValid(pdf) for pdf in documents)
+        preview.unlink()  # Windows rejects this if QPdfDocument owns an open QFile.
         dialog.search()
         dialog.deleteLater()
     # Also cover parent-driven destruction, which does not call done().
     owner.deleteLater()
     QCoreApplication.sendPostedEvents(None,QEvent.DeferredDelete)
+    preview.unlink(missing_ok=True)
     QTest.qWait(10)
     del dialog,owner
     gc.collect()

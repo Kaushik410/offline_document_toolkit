@@ -41,7 +41,8 @@ def native_check(executable,report,require_libreoffice=False,gui_platform='offsc
     result=subprocess.run(command,cwd=report.parent,env=native_environment(gui_platform),timeout=240)
     if result.returncode or not report.is_file():raise RuntimeError('Installed application self-test failed.')
     data=json.loads(report.read_text())
-    if not data.get('passed'):raise RuntimeError(data.get('error','Native acceptance checks failed.'))
+    if data.get('error') or not data.get('passed'):
+        raise RuntimeError(data.get('error') or 'Native acceptance checks failed.')
     if not data.get('runtime',{}).get('frozen'):raise RuntimeError('The installer must run its bundled Python runtime.')
     if require_libreoffice and not data.get('libreoffice',{}).get('verified'):
         raise RuntimeError('The required native LibreOffice conversion was not verified.')

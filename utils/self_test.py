@@ -22,7 +22,6 @@ def run(report_file=None,require_libreoffice=False):
             configure_qt_plugins()
             import fitz
             from PySide6.QtWidgets import QApplication
-            from PySide6.QtPdf import QPdfDocument
             from services.workspace_model import WorkspaceModel
             from services.workspace_service import import_documents,render_workspace_page
             from services.workspace_store import WorkspaceStore
@@ -75,10 +74,13 @@ def run(report_file=None,require_libreoffice=False):
             comparison=prepare_packet_review(model.document,review['staged'],job/'review')
             viewer=DocumentReviewDialog(comparison['before'],comparison['after'],comparison['pages'],
                 viewer_before=comparison['viewer_before'],viewer_after=comparison['viewer_after'])
-            viewer.show();app.processEvents()
-            assert all(pdf.pageCount()==1 for pdf in viewer.documents)
-            with fitz.open(comparison['viewer_after']) as display:assert 'Reviewed' in display[0].get_text()
-            viewer.query.setText('Public');viewer.search();app.processEvents();viewer.close()
+            try:
+                viewer.show();app.processEvents()
+                assert all(pdf.pageCount()==1 for pdf in viewer.documents)
+                with fitz.open(comparison['viewer_after']) as display:assert 'Reviewed' in display[0].get_text()
+                viewer.query.setText('Public');viewer.search();app.processEvents()
+            finally:
+                viewer.close()
             report['checks'].append('Embedded PDF comparison, search and review')
             approve_export(job);result=execute_workflow(spec,job)
             assert result['state']=='succeeded'
@@ -102,7 +104,8 @@ def run(report_file=None,require_libreoffice=False):
                     assert len(pdf)==1 and 'LIBREOFFICE NATIVE ACCEPTANCE CHECK' in pdf[0].get_text()
                 report['libreoffice']['verified']=True
                 report['checks'].append('Required real LibreOffice DOCX conversion')
-            shutdown_tasks();report['passed']=True
+            shutdown_tasks()
+        report['passed']=True
     except Exception as error:
         report['error']=f'{type(error).__name__}: {error}'
     if report_file:
